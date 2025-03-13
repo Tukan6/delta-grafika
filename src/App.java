@@ -23,9 +23,13 @@ public class App {
     private MouseAdapter mouseAdapter;
     private KeyAdapter keyAdapter;
     private Point point;
+    private Point selectedPoint;
+    private Line selectedLine;
+    private static final int SELECTION_THRESHOLD = 10; // pixels
     private LineCanvasRasterizer rasterizer;
     private LineCanvas canvas;
     private boolean controlMode = false;
+    private boolean shiftMode = false;
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> new App(800, 600).start());
@@ -90,43 +94,70 @@ public class App {
         mouseAdapter = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
-                point = new Point(e.getX(), e.getY());
+                if (e.getButton() == MouseEvent.BUTTON1) {
+                    point = new Point(e.getX(), e.getY());
+                } else if (e.getButton() == MouseEvent.BUTTON3) {
+                    // Right click - try to select nearest point
+                    Point clickPoint = new Point(e.getX(), e.getY());
+                    findNearestPoint(clickPoint);
+                }
             }
 
             @Override
             public void mouseReleased(MouseEvent e) {
-                Point point2 = new Point(e.getX(), e.getY());
-                Line line = new Line(point, point2, Color.red);
+                if (e.getButton() == MouseEvent.BUTTON1) {
+                    Point point2 = new Point(e.getX(), e.getY());
+                    if (shiftMode) {
+                        point2 = makeLinestraight(point, point2);
+                    }
+                    Line line = new Line(point, point2, Color.red);
 
-                raster.clear();
+                    raster.clear();
 
-                if (controlMode) {
-                    canvas.addDottedLine(line);
-                } else {
-                    canvas.add(line);
+                    if (controlMode) {
+                        canvas.addDottedLine(line);
+                    } else {
+                        canvas.add(line);
+                    }
+
+                    rasterizer.rasterizeCanvas(canvas);
+                    panel.repaint();
+                } else if (e.getButton() == MouseEvent.BUTTON3) {
+                    selectedPoint = null;
+                    selectedLine = null;
                 }
-
-                rasterizer.rasterizeCanvas(canvas);
-
-                panel.repaint();
             }
 
             @Override
             public void mouseDragged(MouseEvent e) {
-                Point point2 = new Point(e.getX(), e.getY());
-                Line line = new Line(point, point2, Color.red);
+                if ((e.getModifiersEx() & MouseEvent.BUTTON1_DOWN_MASK) != 0) {
+                    // Left button drag
+                    Point point2 = new Point(e.getX(), e.getY());
+                    if (shiftMode) {
+                        point2 = makeLinestraight(point, point2);
+                    }
+                    Line line = new Line(point, point2, Color.red);
 
-                raster.clear();
+                    raster.clear();
 
-                rasterizer.rasterizeCanvas(canvas);
+                    rasterizer.rasterizeCanvas(canvas);
 
-                if (controlMode) {
-                    rasterizer.rasterizeDottedLine(line);
-                } else {
-                    rasterizer.rasterizeLine(line);
+                    if (controlMode) {
+                        rasterizer.rasterizeDottedLine(line);
+                    } else {
+                        rasterizer.rasterizeLine(line);
+                    }
+
+                    panel.repaint();
+                } else if ((e.getModifiersEx() & MouseEvent.BUTTON3_DOWN_MASK) != 0) {
+                    // Right button drag - move selected point
+                    if (selectedPoint != null && selectedLine != null) {
+                        updateSelectedPointPosition(e.getX(), e.getY());
+                        raster.clear();
+                        rasterizer.rasterizeCanvas(canvas);
+                        panel.repaint();
+                    }
                 }
-
-                panel.repaint();
             }
         };
 
@@ -137,6 +168,8 @@ public class App {
             public void keyPressed(KeyEvent e) {
                 if (e.getKeyCode() == KeyEvent.VK_CONTROL) {
                     controlMode = true;
+                } else if (e.getKeyCode() == KeyEvent.VK_SHIFT) {
+                    shiftMode = true;
                 }
             }
 
@@ -144,8 +177,74 @@ public class App {
             public void keyReleased(KeyEvent e) {
                 if (e.getKeyCode() == KeyEvent.VK_CONTROL) {
                     controlMode = false;
+                } else if (e.getKeyCode() == KeyEvent.VK_SHIFT) {
+                    shiftMode = false;
                 }
             }
         };
+    }
+
+    private void findNearestPoint(Point clickPoint) {
+        selectedPoint = null;
+        selectedLine = null;
+        double minDistance = SELECTION_THRESHOLD;
+
+        for (Line line : canvas.getLines()) {
+            double dist1 = distance(clickPoint, line.getPoint1());
+            double dist2 = distance(clickPoint, line.getPoint2());
+
+            if (dist1 < minDistance) {
+                minDistance = dist1;
+                selectedPoint = line.getPoint1();
+                selectedLine = line;
+            }
+            if (dist2 < minDistance) {
+                minDistance = dist2;
+                selectedPoint = line.getPoint2();
+                selectedLine = line;
+            }
+        }
+
+        for (Line line : canvas.getDottedLines()) {
+            double dist1 = distance(clickPoint, line.getPoint1());
+            double dist2 = distance(clickPoint, line.getPoint2());
+
+            if (dist1 < minDistance) {
+                minDistance = dist1;
+                selectedPoint = line.getPoint1();
+                selectedLine = line;
+            }
+            if (dist2 < minDistance) {
+                minDistance = dist2;
+                selectedPoint = line.getPoint2();
+                selectedLine = line;
+            }
+        }
+    }
+
+    private double distance(Point p1, Point p2) {
+        int dx = p1.getX() - p2.getX();
+        int dy = p1.getY() - p2.getY();
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    private void updateSelectedPointPosition(int x, int y) {
+        if (selectedPoint != null) {
+            selectedPoint.setX(x);
+            selectedPoint.setY(y);
+        }
+    }
+
+    private Point makeLinestraight(Point start, Point end) {
+        int dx = Math.abs(end.getX() - start.getX());
+        int dy = Math.abs(end.getY() - start.getY());
+        
+        if (dx > dy) {
+            // Make horizontal line
+            return new Point(end.getX(), start.getY());
+        } else {
+            // Make vertical line
+            return new Point(end.getX(), end.getY());
+        }
     }
 }
